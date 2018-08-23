@@ -49,7 +49,8 @@ class Node:
 
         # NodeWeight is builtBuildingArea / builtRoadArea | ONCE THE MAP IT'S BEEN UPDATED
         if self.buildingList.getBuiltArea(self.matrixMap) == 0:
-            self.nodeWeight = 0            
+            # Penalize "only" roads city
+            self.nodeWeight = self.buildingList.getRoadArea(self.matrixMap) * 30
         else:
             self.nodeWeight = int(round(self.buildingList.getRoadArea(self.matrixMap) * 100 / self.buildingList.getBuiltArea(self.matrixMap)))
 
@@ -172,13 +173,26 @@ class SearchTree:
     def __init__(self, initialNode):
         self.nodeList = NodeList(initialNode)
 
+        self.lock = threading.Lock()
+
+        # Number of threads created to expand the nodes
+        self.numberThreads = 100
+
     def expandNode(self, node):
-        self.nodeList = NodeList(self.nodeList + node.computeChildNodes())
+        childNodes = node.computeChildNodes()
+
+        # Thread safe operation: add members
+        self.lock.acquire()
+        self.nodeList = NodeList(self.nodeList + childNodes)
+        self.lock.release()
 
         #print("Expand node: " + str(node))
 
+        # Thread safe operation: remove members
+        self.lock.acquire()
         # Once a node is expanded it is deleted from the list
         self.nodeList.delete(node.nodeId)
+        self.lock.release()
 
         print('.', end='', flush=True)
 
@@ -199,16 +213,22 @@ class SearchTree:
 
 
     def expandAllNodesWithLowerWeight(self):
-        lowerWeightNode = self.getLowerWeightNode()
-        lowerWeightNodeId = lowerWeightNode.nodeId
-        nodesWithLowerWeight = self.nodeList.getAllNodesWithWeight(lowerWeightNode.nodeWeight)
+
+        # Sorts list from lower Weight to then loop over and take self.numberThreads of them
+        self.nodeList = sorted(self.nodeList, key=lambda node: node.nodeWeight)
+
+        #lowerWeightNode = self.getLowerWeightNode()
+        #lowerWeightNodeId = lowerWeightNode.nodeId
+        #nodesWithLowerWeight = self.nodeList.getAllNodesWithWeight(lowerWeightNode.nodeWeight)
 
         threads = []
-        for node in nodesWithLowerWeight:
+        for index, node in enumerate(self.nodeList):
 
             th = threading.Thread(target = self.expandNode, args=[node])
             th.start()
             threads.append(th)
+
+            if index > self.numberThreads: break
             
 
         # Wait for all threads to complete

@@ -24,6 +24,24 @@ class MapGeometry:
                 if self.polygon.intersects(geometry.Point(coordX, coordY)):
                     self.matrixMap[coordX][coordY] = 0
 
+def ismember(matrix, pattern):
+    foundNumber = 0
+    for coordX in range(matrix.shape[0]):
+        for coordY in range(matrix.shape[1]):
+
+            found = True
+            if matrix[coordX][coordY] == pattern[0][0]:
+                for coordXp in range(pattern.shape[0]):
+                    for coordYp in range(pattern.shape[1]):
+                        if coordX+coordXp < matrix.shape[0] and coordY+coordYp < matrix.shape[1] \
+                        and pattern[coordXp][coordYp] != matrix[coordX+coordXp][coordY+coordYp]: 
+                            found = False
+                            break
+                    if not found: break
+            if found:
+                foundNumber += 1
+    return foundNumber
+
 class BaseMap:
 
     def __init__(self, availableAreaGeometry):
@@ -35,6 +53,48 @@ class BaseMap:
     def getAreaUsedBy(self, buildingId):
         return len(np.nonzero(self.matrixMap == buildingId)[0])  # Tonwhall is 1, SimpleRoad is 2, DoubleRoad is 3
 
+    def findUnbiltHolesRounded(self):
+        # Returns matrix with all 0 as TRUE and the rest as FALSE
+        maskedMap = self.matrixMap == 0
+
+        print(maskedMap)
+
+        # Searchs for whole patterns like (true when it is 0):
+        #
+        #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE FALSE FALSE
+        #  FALSE TRUE  FALSE          FALSE TRUE  TRUE  FALSE         FALSE TRUE  FALSE
+        #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE TRUE  FALSE
+        #                                                             FALSE FALSE FALSE
+
+        holePatterns = []
+        holePatterns.append(np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]]))
+        holePatterns.append(np.array([[1, 1, 1, 1], [1, 0, 0, 1], [1, 1, 1, 1]]))
+        holePatterns.append(np.array([[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]]))
+
+        countHoles = 0
+        for pattern in holePatterns:
+            pattern = pattern == 0
+            #countHoles += len(np.argwhere((maskedMap == pattern)))
+            countHoles += ismember(maskedMap, pattern)
+
+        """holeA = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]])
+        holeA = holeA == 0
+        holeB = np.array([[1, 1, 1, 1], [1, 0, 0, 1], [1, 1, 1, 1]])
+        holeB = holeB == 0
+        holeC = np.array([[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]])
+        holeC = holeC == 0
+
+        # Make 'numpy.ndarray' hashable as tuples
+        nholeA = ismember(holeA, maskedMap)
+        nholeB = ismember(holeB, maskedMap)
+        nholeC = ismember(holeC, maskedMap)
+
+        holes = nholeA + nholeB + nholeC
+
+        print (holeA.mask)"""
+        print ("Found " + str(countHoles) + " holes")
+
+
     ## Place building of given type in map matrix, using coordinates position as the upper left corner of the building
     # @param buildingType             Buildin to place
     # @param position                Coordinates of the upper left corner
@@ -45,7 +105,7 @@ class BaseMap:
         # Check that the space for this building is empty in the map
         for x in range(position[0], buildingType.size[0]+position[0]):
             for y in range(position[1], buildingType.size[1]+position[1]):
-                if x > self.sizeX or y > self.sizeY:
+                if x > self.sizeX or y > self.sizeY or x < 0 or y < 0:
                     return False
 
                 if self.matrixMap[x][y] != 0:
@@ -68,21 +128,21 @@ class BaseMap:
     def getNeighbourCellsTo(self, buildingType, position):
         neighbourCells = []
         # Gets neighbours of the building (it thery are inside the matrix and empty)
-        if position[0] >= 1:
+        if position[0] >= 0:
             for cellY in range(position[1], position[1] + buildingType.size[1]):
                 neighbourCells.append([position[0]-1,cellY])
 
-        if position[1] >= 1:
+        if position[1] >= 0:
             for cellX in range(position[0], position[0] + buildingType.size[0]):
                 neighbourCells.append([cellX,position[1]-1])
 
         endPosition = [position[0] + buildingType.size[0], position[1] + buildingType.size[1]]
         #debug print("End position is: "+str(endPosition))
-        if endPosition[0] <= self.sizeX:
+        if endPosition[0] < self.sizeX:
             for cellY in range(endPosition[1] - buildingType.size[1], endPosition[1]):
                 neighbourCells.append([endPosition[0],cellY])
 
-        if endPosition[1] <= self.sizeY:
+        if endPosition[1] < self.sizeY:
             for cellX in range(endPosition[0] - buildingType.size[0], endPosition[0]):
                 neighbourCells.append([cellX,endPosition[1]])
 
@@ -112,7 +172,6 @@ class BaseMap:
 
         return validCells
 
-
     ## Checks in map if building at a given corner position is next to another building
     #  the map
     # @param buildingType1           Buildin to check
@@ -124,6 +183,33 @@ class BaseMap:
 
         for cell in neighbourCells:
             if self.matrixMap[cell[0]][cell[1]] == buildingType2.mapIdentifier:
+                
+                # Must be re-done in a better way...
+                # Double road must connect to itself by two cells:
+                #
+                #   NOT VALID:  |   VALID:
+                #
+                #     ##        |    ####
+                #     ####      |    ####
+                #       ##      |    ##
+                #       ##      |    ##
+
+                if (buildingType1.name == "DoubleRoad" and buildingType2.name == "DoubleRoad")\
+                or (buildingType1.name == "DoubleRoad" and buildingType2.name == "Townhall")\
+                or (buildingType1.name == "Townhall" and buildingType2.name == "DoubleRoad"):
+
+                    from Optimizer.Building import BaseBuilding
+                    # Uses SimpleRoad type is its 1 cell sized, gets neighbours of cell
+                    neighbourCellsToCell = self.getNeighbourCellsTo(BaseBuilding(name = "SimpleRoad", size = [1,1], number = 0, nearBuildingList = ["SimpleRoad", "DoubleRoad", "Townhall"]), cell)
+                    # Intersection between both lists
+                    commonCellList = [element for element in neighbourCells if element in neighbourCellsToCell]
+                    #commonCellList = (set(neighbourCells).intersection(neighbourCellsToCell))
+                    for commonCell in commonCellList:
+                            # Checks that in the cell theres actually the Road
+                            if self.matrixMap[commonCell[0]][commonCell[1]] == buildingType2.mapIdentifier:
+                                return True
+                    return False
+
                 return True
 
         return False

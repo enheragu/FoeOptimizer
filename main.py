@@ -73,14 +73,18 @@ stop = timeit.default_timer()
 print("\nTime exploring tree: ", stop - start)
 print("Memory usage is : " + str(memory_usage_resource()) + " MB")
 print("Generated " + str(nodeIdObj.getCurrentId()) + " nodes")
+print("Time per node (all nodes): "+ str((stop - start)/nodeIdObj.getCurrentId()))
 print("At this stage there are "+str(len(searchTree.nodeList))+" horizon nodes")
-print("Approximately " + str(len(searchTree.nodeList)/nodeIdObj.getCurrentId()) + " MB/node\n")
+print("Memory per node (stored horizon nodes) " + str(memory_usage_resource()/len(searchTree.nodeList)) + " MB/node\n")
 
 
 print("Last node exploded is: "+str(searchTree.getLastExpandedNode()))
+searchTree.getLastExpandedNode().matrixMap.findUnbiltHolesRounded()
 printMap(searchTree.getLastExpandedNode().matrixMap.matrixMap)
 
-print("Last node exploded is: "+str(searchTree.getLowerWeightNode()))
+
+print("Lowe weight's node exploded is: "+str(searchTree.getLowerWeightNode()))
+searchTree.getLowerWeightNode().matrixMap.findUnbiltHolesRounded()
 printMap(searchTree.getLowerWeightNode().matrixMap.matrixMap)
 
 """
