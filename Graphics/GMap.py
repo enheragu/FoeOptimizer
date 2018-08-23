@@ -19,3 +19,15 @@ def printMap(matrix):
     plt.show()
 
 
+
+
+def update(data):
+    mat.set_data(data)
+    return mat 
+
+def printMatrixAnimation(matrixList):
+    fig, ax = plt.subplots()
+    mat = ax.matshow(matrixList[0])
+    plt.colorbar(mat)
+    ani = animation.FuncAnimation(fig, update, matrixList, interval=100)
+    plt.show()

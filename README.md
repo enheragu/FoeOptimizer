@@ -1,12 +1,13 @@
 
 
-Current state over 15 iterations:
+Current state over 500 iterations:
 ___________________________________________
 
-Iteration 14 took 23.575891446998867 nodeList contains up to 5821 nodes (total of 45927). Memory usage is : 209.46484375 MB
-Time exploring tree:  135.82543096400332
-Memory usage is : 209.46484375 MB
-Generated 45927 nodes
-At this stage there are 5821 horizon nodes
-Approximately 0.1267446164565506 MB/node
+500 iterations performed
+Time exploring tree: [0 day, 0 h, 4 min, 30 sec]
+Memory usage is: 139.18359375 MB
+Generated 39067 nodes
+Time per node (all nodes): 0.006915440127396475 seconds
+At this stage there are 24096 horizon nodes
+Memory per node (all nodes): 0.0035626895781605957 MB/node
 ___________________________________________

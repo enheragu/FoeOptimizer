@@ -102,15 +102,22 @@ class BuildingList(list):
             building.setMapIdentifier(index+1)
             building.computeNearBuilding(self[:])
 
+        self.numberOfBuildings = 0
+        for building in self[3:]:
+            self.numberOfBuildings += building.number
+
     def getBuiltArea(self, matrixMap):
         area = 0
+        numberBuildings = 0
         for buildingType in self[:]:
             if buildingType == "SimpleRoad" or buildingType == "DoubleRoad" or buildingType == "Townhall":
                 continue
             else:
-                area += matrixMap.getAreaUsedBy(buildingType.mapIdentifier)
+                areaThisBuilding = matrixMap.getAreaUsedBy(buildingType.mapIdentifier)
+                numberBuildings += (areaThisBuilding/buildingType.getArea())
+                area += areaThisBuilding
 
-        return area
+        return area, numberBuildings
 
     def getRoadArea(self, matrixMap):
         areaSimpleRoad = matrixMap.getAreaUsedBy(self.get("SimpleRoad").mapIdentifier)

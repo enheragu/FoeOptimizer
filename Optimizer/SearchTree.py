@@ -5,7 +5,9 @@ from Optimizer.Map import BaseMap
 import numpy as np
 import copy as cp
 
-import threading
+import concurrent.futures
+
+import timeit
 
 class NodeId:
     def __init__(self):
@@ -20,98 +22,152 @@ class NodeId:
 
 class Node:
 
-    def __init__(self, nodeIdObj, buildingList, buildingType, buildingPosition, parentNode = None, matrixMap = None):
-        self.nodeIdObject = nodeIdObj
-        self.nodeId = self.nodeIdObject.getNewId()
+    def __init__(self, buildingList, buildingType, buildingPosition, parentNode = None, emptyMatrixMap = None):
         self.buildingType = buildingType
         self.buildingPosition = buildingPosition
 
         self.parentNode = parentNode
         self.buildingList = buildingList
 
-        weightIncrement = 1 # TBD!! Based on heuristic
-
         if parentNode is not None:
-            self.matrixMap = cp.deepcopy(parentNode.matrixMap)
-            #self.nodeWeight = (parentNode.nodeWeight + weightIncrement)   # (BuiltArea - ToBuildArea) + RoadsArea
+            #regressedMatrixMap = cp.deepcopy(parentNode.matrixMap)
+            self.emptyMatrixMap = parentNode.emptyMatrixMap
         else:
-            self.matrixMap = cp.deepcopy(matrixMap)
-            #self.nodeWeight = (0 + weightIncrement)                       # (BuiltArea - ToBuildArea) + RoadsArea
+            #regressedMatrixMap = cp.deepcopy(matrixMap)
+            self.emptyMatrixMap = emptyMatrixMap
 
+
+        regressedMatrixMap = cp.deepcopy(self.emptyMatrixMap)
+        self.regressMatrixMapFromAncestryNodes(regressedMatrixMap)
+        self.regressedMatrixMap = regressedMatrixMap
 
         # Places the building in both building list and map matrix
-        if not self.buildingType.placeBuilding(self.matrixMap):
+        if not self.buildingType.placeBuilding(regressedMatrixMap):
             raise Exception("All building of this type ("+str(self.buildingType.name)+") had already been placed")
 
-        if not self.matrixMap.placeBuildingInCorner(self.buildingType, self.buildingPosition):
+        if not regressedMatrixMap.placeBuildingInCorner(self.buildingType, self.buildingPosition):
             raise Exception("Cannot place building in position "+str(self.buildingPosition)+" of map matrix")
 
 
         # NodeWeight is builtBuildingArea / builtRoadArea | ONCE THE MAP IT'S BEEN UPDATED
-        if self.buildingList.getBuiltArea(self.matrixMap) == 0:
-            # Penalize "only" roads city
-            self.nodeWeight = self.buildingList.getRoadArea(self.matrixMap) * 30
-        else:
-            self.nodeWeight = int(round(self.buildingList.getRoadArea(self.matrixMap) * 100 / self.buildingList.getBuiltArea(self.matrixMap)))
+        builtArea, numberBuiltBuildings = self.buildingList.getBuiltArea(regressedMatrixMap)
+        roadBuiltArea = self.buildingList.getRoadArea(regressedMatrixMap)
+        numberBuildings = self.buildingList.numberOfBuildings
 
+        # Whole map area (forbidden parts of the map are not taken into account to avoid losing time, 
+        # this operation is much faster and the same error applies to ALL nodes)
+        wholeArea = regressedMatrixMap.matrixMap.shape[0]*regressedMatrixMap.matrixMap.shape[1]
+
+        if builtArea == 0 or numberBuiltBuildings == 0:
+            # Penalize "only" roads city
+            self.nodeWeight = roadBuiltArea * 40
+        else:
+            self.nodeWeight = (roadBuiltArea * 100 / builtArea)
+            self.nodeWeight += (numberBuildings / numberBuiltBuildings)
+            self.nodeWeight += (wholeArea / builtArea)
+
+        self.nodeWeight = int(round(self.nodeWeight))
+
+        ## TOO TIME CONSUMING OPERATION BELOW ##
+        # Penalize empty holes between buildings
+        # self.nodeWeight += regressedMatrixMap.findUnbiltHolesRounded() * 30
+        ##                                    ##
 
         self.childNodes = NodeList()
 
         #debug print("Create "+str(self))
 
-    def computeChildNodes(self):
+    def computeByBuilding(self, buildingName):
 
-        possibleBuildingsToPlace = self.buildingType.buildingListToNear
-        validNeighbourCells = self.matrixMap.getValidNeighbourCellsTo(self.buildingType, self.buildingPosition)
+        regressedMatrixMap = self.regressedMatrixMap
 
-        #debug print("Building list near is: " + str(possibleBuildingsToPlace))
-        #debug print("Valid neighbour cells are: " + str(validNeighbourCells))
-        # Child nodes are all possible cominations of validNeighbourCells with possibleBuildingsToPlace
-        # and bonus building. Only valid combinations generate new Nodes
-        for buildingName in possibleBuildingsToPlace:
+        validNeighbourCells = regressedMatrixMap.getValidNeighbourCellsTo(self.buildingType, self.buildingPosition)
+        buildingType = self.buildingList.get(buildingName)
+        cornerCells = []
+        childNodes = []
 
-            buildingType = self.buildingList.get(buildingName)
-            cornerCells = []
+        for neigbourCell in validNeighbourCells:
+            # For each neighbourCell gets all valid corner cells for a building's footprint to intersect this cell (neighbour)
+            cornerCells = regressedMatrixMap.getPossibleCornerOccupying(buildingType,neigbourCell)
+            #debug print("Valid corner cells are: " + str(cornerCells))
 
-            for neigbourCell in validNeighbourCells:
-                # For each neighbourCell gets all valid corner cells for a building's footprint to intersect this cell (neighbour)
-                cornerCells = self.matrixMap.getPossibleCornerOccupying(buildingType,neigbourCell)
-                #debug print("Valid corner cells are: " + str(cornerCells))
+            for cell in cornerCells: 
+                # Check that there are still buildings of this type to add and it can be added in the matrix cell decided
+                if buildingType.placeBuilding(regressedMatrixMap) and regressedMatrixMap.placeBuildingInCorner(buildingType, cell, False):
+                    found = False
 
-                for cell in cornerCells: 
-                    # Check that there are still buildings of this type to add and it can be added in the matrix cell decided
-                    if buildingType.placeBuilding(self.matrixMap) and self.matrixMap.placeBuildingInCorner(buildingType, cell, False):
-                        found = False
+                    # Checks that the new building is placed at least next to one of the nearBuildings needed
+                    for buildingType2Name in buildingType.nearBuildingList:
+                        buildingType2 = self.buildingList.get(buildingType2Name)
+                        if regressedMatrixMap.isBuildingNextTo(buildingType, cell, buildingType2):
+                            found = True
+                            break
 
-                        # Checks that the new building is placed at least next to one of the nearBuildings needed
-                        for buildingType2Name in buildingType.nearBuildingList:
+                    # Checks that the new building is placed next to all bonus building if there are
+                    if buildingType.bonusBuildingList is not None and found is True:
+                        for buildingType2Name in buildingType.bonusBuildingList:
                             buildingType2 = self.buildingList.get(buildingType2Name)
-                            if self.matrixMap.isBuildingNextTo(buildingType, cell, buildingType2):
-                                found = True
+                            if not regressedMatrixMap.isBuildingNextTo(buildingType, cell, buildingType2):
+                                found = False
                                 break
 
-                        # Checks that the new building is placed next to all bonus building if there are
-                        if buildingType.bonusBuildingList is not None and found is True:
-                            for buildingType2Name in buildingType.bonusBuildingList:
-                                buildingType2 = self.buildingList.get(buildingType2Name)
-                                if not self.matrixMap.isBuildingNextTo(buildingType, cell, buildingType2):
-                                    found = False
-                                    break
+                    # If both conditions matchs
+                    if found is True:
+                        childNodes.append([buildingType, cell])
 
-                        # If both conditions matchs, and it has not been added before, adds the new node
-                        if found is True and not self.childNodes.contains(buildingType, cell):
-                            self.childNodes.append(Node(self.nodeIdObject, self.buildingList, buildingType, cell, self))
+        return childNodes
 
+    def computeChildNodes(self):
+
+        start = timeit.default_timer()
+        possibleBuildingsToPlace = self.buildingType.buildingListToNear
+
+        generateNodes = []
+
+        self.regressedMatrixMap = self.getRegressedMatrix()
+
+        # Child nodes are all possible cominations of validNeighbourCells with possibleBuildingsToPlace
+        # and bonus building. Only valid combinations generate new Nodes
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Analyces cell row with PoolExecutor
+            for childNodes in executor.map(self.computeByBuilding, possibleBuildingsToPlace):
+                generateNodes += childNodes
+
+        # Avoid creation of repeated nodes
+        for generateNode in generateNodes:
+            if not self.childNodes.contains(generateNode[0], generateNode[1]):
+                self.childNodes.append(Node(self.buildingList, generateNode[0], generateNode[1], self))
+
+        del self.regressedMatrixMap
+
+        stop = timeit.default_timer()
+        #debug print("Compute child nodes took: ", stop-start)
         return self.childNodes
 
+
+    def regressMatrixMapFromAncestryNodes(self, emptyMatrix):
+
+        nextNode = self.parentNode
+
+        while nextNode != None:
+            emptyMatrix.placeBuildingInCorner(nextNode.buildingType, nextNode.buildingPosition)
+            nextNode = nextNode.parentNode 
+
+    def getRegressedMatrix(self):
+
+        regressedMatrixMap = cp.deepcopy(self.emptyMatrixMap)
+        self.regressMatrixMapFromAncestryNodes(regressedMatrixMap)
+
+        # Place this building:
+        regressedMatrixMap.placeBuildingInCorner(self.buildingType, self.buildingPosition)
+
+        return regressedMatrixMap
 
     ## Check if this is the searched building based on name or mapIdentifier
     # @param tag                    Name or mapIdentifier of the building
     # @return                        True if the tag matchs either the name or the map identifier, False otherwise    
     def __eq__(self, tag):
-        if type(tag) is int and tag == self.nodeId:
-            return True
-        elif type(tag) is Node and tag.buildingType.name == self.buildingType.name and tag.buildingPosition == self.buildingPosition:
+        if type(tag) is Node and tag.buildingType.name == self.buildingType.name and tag.buildingPosition == self.buildingPosition:
             return True 
         else:
             return False
@@ -119,9 +175,8 @@ class Node:
                 
     ## To string method overload
     def __str__(self):
-        parentId = ( "None" if self.parentNode is None else self.parentNode.nodeId )
         childNodes = ( "[NotExpanded]" if not self.childNodes else str(self.childNodes))
-        string = "Node (" + str(self.nodeId) + ") -> Place building " + str(self.buildingType.name) + "("+str(self.buildingType.mapIdentifier)+") at " + str(self.buildingPosition) + " with weight = ["+str(self.nodeWeight)+"] | Parent is node (" + str(parentId) + "). Child nodes includes: " + str(childNodes)
+        string = "Node -> Place building " + str(self.buildingType.name) + "("+str(self.buildingType.mapIdentifier)+") at " + str(self.buildingPosition) + " with weight = ["+str(self.nodeWeight)+"] | Child nodes includes: " + str(childNodes)
         return string
 
 
@@ -172,44 +227,17 @@ import math
 class SearchTree:
     def __init__(self, initialNode):
         self.nodeList = NodeList(initialNode)
+        self.expandedNodeList = NodeList()
+        self.totalNodesNum = 0
 
-        self.lock = threading.Lock()
+    def getChildNodesOf(self, nodeList):
+        return self.nodeList[nodeList].computeChildNodes()
 
-        # Number of threads created to expand the nodes
-        self.numberThreads = 100
-
-    def expandNode(self, node):
-        childNodes = node.computeChildNodes()
-
-        # Thread safe operation: add members
-        self.lock.acquire()
-        self.nodeList = NodeList(self.nodeList + childNodes)
-        self.lock.release()
-
-        #print("Expand node: " + str(node))
-
-        # Thread safe operation: remove members
-        self.lock.acquire()
-        # Once a node is expanded it is deleted from the list
-        self.nodeList.delete(node.nodeId)
-        self.lock.release()
-
-        print('.', end='', flush=True)
-
-
-    def expandLowerWeightNode(self):
-        lowerWeightNode = self.getLowerWeightNode()
-        lowerWeightNodeId = lowerWeightNode.nodeId
-
-        self.expandNode(lowerWeightNode.computeChildNodes())
-
-        #debug print("Lower weight in node: " + str(lowerWeightNode))
-
-
-    def expandNodeWithId(self, id):
-        nodeWithId = self.nodeList.get(id)
-
-        self.expandNode(nodeWithId)
+        # For ProcessPool
+        #childNodeList = []
+        #for node in nodeList:
+        #    childNodeList += node.computeChildNodes()
+        #return childNodeList
 
 
     def expandAllNodesWithLowerWeight(self):
@@ -217,41 +245,45 @@ class SearchTree:
         # Sorts list from lower Weight to then loop over and take self.numberThreads of them
         self.nodeList = sorted(self.nodeList, key=lambda node: node.nodeWeight)
 
-        #lowerWeightNode = self.getLowerWeightNode()
-        #lowerWeightNodeId = lowerWeightNode.nodeId
-        #nodesWithLowerWeight = self.nodeList.getAllNodesWithWeight(lowerWeightNode.nodeWeight)
+        # Number of "lowerWeight" nodes get analyzed
+        self.numberOfNodes = 30
+        # How many nodes gets each process to get its childs
+        CHUNKSIZE = 1
 
-        threads = []
-        for index, node in enumerate(self.nodeList):
+        n = self.numberOfNodes if len(self.nodeList) > self.numberOfNodes else len(self.nodeList)
 
-            th = threading.Thread(target = self.expandNode, args=[node])
-            th.start()
-            threads.append(th)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Analyces cell row with PoolExecutor
 
-            if index > self.numberThreads: break
+            # With threads
+            for childNodes in executor.map(self.getChildNodesOf, range(0,n)):
+                if childNodes is not None:
+                    self.nodeList += NodeList(childNodes)
             
+            # With ProcessPool (can get very slow ¿?)
+            #for childNodes in executor.map(self.getChildNodesOf, (self.nodeList[i:i+CHUNKSIZE] for i in (range(0, n, CHUNKSIZE)))):
+            #    if childNodes is not None:
+            #        #debug print("Append " + str(len(childNodes)) + " nodes to list")
+            #        self.nodeList += NodeList(childNodes)
 
-        # Wait for all threads to complete
-        for t in threads:
-           t.join()
+
+        #debug print("Node list len: " + str(len(self.nodeList)))
+        self.expandedNodeList += NodeList(self.nodeList[0:n])
+        self.nodeList = NodeList(self.nodeList[n:])
+        self.totalNodesNum = len(self.expandedNodeList) + len(self.nodeList)
+
 
     def getLowerWeightNode(self):
         lowerWeight = math.inf
-        lowerWeightId = 0
+        lowerWeightNode = 0
 
         for node in self.nodeList:
             if node.nodeWeight < lowerWeight:
-                lowerWeightId = node.nodeId
+                lowerWeightNode = node
                 lowerWeight = node.nodeWeight
 
-        return self.nodeList.get(lowerWeightId)
+        return self.nodeList.get(lowerWeightNode)
 
 
     def getLastExpandedNode(self):
-        nodeId = 0
-
-        for node in self.nodeList:
-            if node.nodeId > nodeId:
-                higherId = node.nodeId
-
-        return self.nodeList.get(higherId)
+        return self.nodeList[-1]

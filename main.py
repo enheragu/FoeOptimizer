@@ -6,11 +6,16 @@ from Optimizer.Map import MapGeometry
 
 from Graphics.GMap import printMap
 
+import sys
 import time
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 import timeit
+from datetime import datetime, timedelta
+
+# Garbage collector to releas unreferenced memory
+import gc
 
 def memory_usage_resource():
     import sys
@@ -21,7 +26,6 @@ def memory_usage_resource():
         rusage_denom = rusage_denom * rusage_denom
     mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / rusage_denom
     return mem
-
 
 
 buildingList = BuildingList(buildingList = [
@@ -40,7 +44,6 @@ buildingList = BuildingList(buildingList = [
 
 print(str(buildingList))
 
-
 mappedGeometry = MapGeometry([[0,0],[50,0],[50,30],[35,30],[35,50],[0,50],[0,0]])
 emptyMap = BaseMap(mappedGeometry)
 
@@ -49,10 +52,12 @@ emptyMap.placeBuildingInCorner(buildingType, [17,10])
 emptyMap.placeBuildingInCorner(buildingType, [17,12])
 emptyMap.placeBuildingInCorner(buildingType, [17,14])"""
 
-validNodeList = NodeList()
 
-nodeIdObj = NodeId()
-initialNode = Node(nodeIdObj = nodeIdObj, buildingList = buildingList, buildingType = buildingList.get("Townhall"), buildingPosition = [10,10], matrixMap = emptyMap)
+initialNode = Node(buildingList = buildingList, buildingType = buildingList.get("Townhall"), buildingPosition = [10,10], emptyMatrixMap = emptyMap)
+
+print("Size of buildingList: "+ str(sys.getsizeof(buildingList))+" bytes")
+print("Size of emptyMap: "+ str(sys.getsizeof(emptyMap))+" bytes")
+print("Size of initial node: "+ str(sys.getsizeof(initialNode))+" bytes")
 
 searchTree = SearchTree([initialNode])
 
@@ -62,30 +67,42 @@ start = timeit.default_timer()
 #for index in range(5000):
 #    searchTree.expandLowerWeightNode()
 
-for index in range(15):
+num_iterations = 500
+for index in range(num_iterations):
     start1 = timeit.default_timer()
     searchTree.expandAllNodesWithLowerWeight()
     stop1 = timeit.default_timer()
-    print("\nIteration " + str(index) + " took " + str(stop1 - start1) + " nodeList contains up to " + str(len(searchTree.nodeList)) + " nodes (total of "+str(nodeIdObj.getCurrentId())+"). Memory usage is : " + str(memory_usage_resource()) + " MB")
+    print("\nIteration " + str(index) + " took " + str(stop1 - start1) + " nodeList contains up to " + str(len(searchTree.nodeList)) + " nodes (of "+str(searchTree.totalNodesNum)+" generated). Memory usage is : " + str(memory_usage_resource()) + " MB")
+    gc.collect()
 
 stop = timeit.default_timer()
 
-print("\nTime exploring tree: ", stop - start)
-print("Memory usage is : " + str(memory_usage_resource()) + " MB")
-print("Generated " + str(nodeIdObj.getCurrentId()) + " nodes")
-print("Time per node (all nodes): "+ str((stop - start)/nodeIdObj.getCurrentId()))
+
+time = datetime(1,1,1) + timedelta(seconds=int(stop - start))
+
+print("\n"+str(num_iterations) + " iterations performed")
+print("Time exploring tree: [%d day, %d h, %d min, %d sec]" % (time.day-1, time.hour, time.minute, time.second))
+print("Memory usage is: " + str(memory_usage_resource()) + " MB")
+print("Generated " + str(searchTree.totalNodesNum) + " nodes")
+print("Time per node (all nodes): "+ str((stop - start)/searchTree.totalNodesNum) + " seconds")
 print("At this stage there are "+str(len(searchTree.nodeList))+" horizon nodes")
-print("Memory per node (stored horizon nodes) " + str(memory_usage_resource()/len(searchTree.nodeList)) + " MB/node\n")
+print("Memory per node (all nodes): " + str(memory_usage_resource()/searchTree.totalNodesNum) + " MB/node\n")
 
 
 print("Last node exploded is: "+str(searchTree.getLastExpandedNode()))
-searchTree.getLastExpandedNode().matrixMap.findUnbiltHolesRounded()
-printMap(searchTree.getLastExpandedNode().matrixMap.matrixMap)
-
+#searchTree.getLastExpandedNode().matrixMap.findUnbiltHolesRounded()
+printMap((searchTree.getLastExpandedNode()).getRegressedMatrix().matrixMap)
 
 print("Lowe weight's node exploded is: "+str(searchTree.getLowerWeightNode()))
-searchTree.getLowerWeightNode().matrixMap.findUnbiltHolesRounded()
-printMap(searchTree.getLowerWeightNode().matrixMap.matrixMap)
+#searchTree.getLowerWeightNode().matrixMap.findUnbiltHolesRounded()
+printMap((searchTree.getLowerWeightNode()).getRegressedMatrix().matrixMap)
+
+"""
+for node in searchTree.nodeList[0::1000]:
+    print("Node: "+str(node))
+    node.matrixMap.findUnbiltHolesRounded()
+    printMap(node.matrixMap.matrixMap)
+"""
 
 """
 ## Animation with all matrix
@@ -94,13 +111,5 @@ matrixList = []
 for node in searchTree.nodeList:
     matrixList.append(node.matrixMap.matrixMap)
 
-def update(data):
-    mat.set_data(data)
-    return mat 
-
-fig, ax = plt.subplots()
-mat = ax.matshow(initialNode.matrixMap.matrixMap)
-plt.colorbar(mat)
-ani = animation.FuncAnimation(fig, update, matrixList, interval=100)
-plt.show()
+printMatrixAnimation(matrixList)
 """

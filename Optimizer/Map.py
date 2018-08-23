@@ -1,6 +1,7 @@
 
 import numpy as np
 from shapely import geometry
+import concurrent.futures
 
 class MapGeometry:
 
@@ -24,76 +25,12 @@ class MapGeometry:
                 if self.polygon.intersects(geometry.Point(coordX, coordY)):
                     self.matrixMap[coordX][coordY] = 0
 
-def ismember(matrix, pattern):
-    foundNumber = 0
-    for coordX in range(matrix.shape[0]):
-        for coordY in range(matrix.shape[1]):
 
-            found = True
-            if matrix[coordX][coordY] == pattern[0][0]:
-                for coordXp in range(pattern.shape[0]):
-                    for coordYp in range(pattern.shape[1]):
-                        if coordX+coordXp < matrix.shape[0] and coordY+coordYp < matrix.shape[1] \
-                        and pattern[coordXp][coordYp] != matrix[coordX+coordXp][coordY+coordYp]: 
-                            found = False
-                            break
-                    if not found: break
-            if found:
-                foundNumber += 1
-    return foundNumber
 
 class BaseMap:
 
     def __init__(self, availableAreaGeometry):
-        self.sizeX = availableAreaGeometry.sizeX
-        self.sizeY = availableAreaGeometry.sizeY
-
         self.matrixMap = availableAreaGeometry.matrixMap
-
-    def getAreaUsedBy(self, buildingId):
-        return len(np.nonzero(self.matrixMap == buildingId)[0])  # Tonwhall is 1, SimpleRoad is 2, DoubleRoad is 3
-
-    def findUnbiltHolesRounded(self):
-        # Returns matrix with all 0 as TRUE and the rest as FALSE
-        maskedMap = self.matrixMap == 0
-
-        print(maskedMap)
-
-        # Searchs for whole patterns like (true when it is 0):
-        #
-        #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE FALSE FALSE
-        #  FALSE TRUE  FALSE          FALSE TRUE  TRUE  FALSE         FALSE TRUE  FALSE
-        #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE TRUE  FALSE
-        #                                                             FALSE FALSE FALSE
-
-        holePatterns = []
-        holePatterns.append(np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]]))
-        holePatterns.append(np.array([[1, 1, 1, 1], [1, 0, 0, 1], [1, 1, 1, 1]]))
-        holePatterns.append(np.array([[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]]))
-
-        countHoles = 0
-        for pattern in holePatterns:
-            pattern = pattern == 0
-            #countHoles += len(np.argwhere((maskedMap == pattern)))
-            countHoles += ismember(maskedMap, pattern)
-
-        """holeA = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]])
-        holeA = holeA == 0
-        holeB = np.array([[1, 1, 1, 1], [1, 0, 0, 1], [1, 1, 1, 1]])
-        holeB = holeB == 0
-        holeC = np.array([[1, 1, 1], [1, 0, 1], [1, 0, 1], [1, 1, 1]])
-        holeC = holeC == 0
-
-        # Make 'numpy.ndarray' hashable as tuples
-        nholeA = ismember(holeA, maskedMap)
-        nholeB = ismember(holeB, maskedMap)
-        nholeC = ismember(holeC, maskedMap)
-
-        holes = nholeA + nholeB + nholeC
-
-        print (holeA.mask)"""
-        print ("Found " + str(countHoles) + " holes")
-
 
     ## Place building of given type in map matrix, using coordinates position as the upper left corner of the building
     # @param buildingType             Buildin to place
@@ -105,7 +42,7 @@ class BaseMap:
         # Check that the space for this building is empty in the map
         for x in range(position[0], buildingType.size[0]+position[0]):
             for y in range(position[1], buildingType.size[1]+position[1]):
-                if x > self.sizeX or y > self.sizeY or x < 0 or y < 0:
+                if x > self.matrixMap.shape[0] or y > self.matrixMap.shape[1] or x < 0 or y < 0:
                     return False
 
                 if self.matrixMap[x][y] != 0:
@@ -138,11 +75,11 @@ class BaseMap:
 
         endPosition = [position[0] + buildingType.size[0], position[1] + buildingType.size[1]]
         #debug print("End position is: "+str(endPosition))
-        if endPosition[0] < self.sizeX:
+        if endPosition[0] < self.matrixMap.shape[0]:
             for cellY in range(endPosition[1] - buildingType.size[1], endPosition[1]):
                 neighbourCells.append([endPosition[0],cellY])
 
-        if endPosition[1] < self.sizeY:
+        if endPosition[1] < self.matrixMap.shape[1]:
             for cellX in range(endPosition[0] - buildingType.size[0], endPosition[0]):
                 neighbourCells.append([cellX,endPosition[1]])
 
@@ -231,3 +168,82 @@ class BaseMap:
                     cornerValidCells.append([coordX, coordY])
 
         return cornerValidCells
+
+    def getAreaUsedBy(self, buildingId):
+        return len(np.nonzero(self.matrixMap == buildingId)[0])  # Tonwhall is 1, SimpleRoad is 2, DoubleRoad is 3
+
+
+    """ TOO TIME CONSUMING FOR NOW
+    def findUnbiltHolesRounded(self):
+        # Returns matrix with all 0 as TRUE and the rest as FALSE
+
+        maskedMap = self.matrixMap > 0
+        self.maskedMap = maskedMap != 0
+        np.set_printoptions(threshold=np.inf)
+        #debug print(maskedMap)
+
+        # Searchs for whole patterns like (true when it is 0):
+        #
+        #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE FALSE FALSE
+        #  FALSE TRUE  FALSE          FALSE TRUE  TRUE  FALSE         FALSE TRUE  FALSE
+        #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE TRUE  FALSE
+        #                                                             FALSE FALSE FALSE
+
+        self.holePatterns = []
+        self.holePatterns.append(np.array([[0, 0, 0], [0, 1, 0], [0, 0, 0]]))
+        self.holePatterns.append(np.array([[0, 0, 0, 0], [0, 1, 1, 0], [0, 0, 0, 0]]))
+        self.holePatterns.append(np.array([[0, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 0]]))
+
+        countHoles = 0
+
+        # # THREADED VERSION
+        #with concurrent.futures.ThreadPoolExecutor() as executor:
+        #    # Analyces cell row with PoolExecutor
+        #    for result in executor.map(self.patternStartsHere, np.ndenumerate(self.maskedMap)):
+        #        if result: 
+        #            countHoles += 1
+        ##
+
+        # Non threaded version
+        for cellAndValue in np.ndenumerate(self.maskedMap):
+            if self.patternStartsHere(cellAndValue): 
+                countHoles += 1
+
+        # Avoid keep extra memory
+        del self.maskedMap
+        del self.holePatterns
+
+        #print ("Found " + str(countHoles) + " holes")
+        return countHoles
+
+
+    # Checks if a given pattern starts in a cell of a matrix
+    def patternStartsHere(self, cellAndValue):
+
+        # Cell and value is a tuple like: ((1,2), True)
+        cellX = cellAndValue[0][0]
+        cellY = cellAndValue[0][1]
+        value = cellAndValue[1]
+
+        #debug print("cellX: " + str(cellX) + ", cellY: " + str(cellY) + ", value: " + str(value) )
+
+        for patternmMatch in self.holePatterns:
+            # No more than one pattern can match at the same time
+            if self.checkPattern(cellX, cellY, value, patternmMatch):
+                return True
+
+
+    def checkPattern(self, cellX, cellY, value, patternmMatch):        
+        # Check if pattern can fit in the rest of the matrix, and if the value match the first value of the pattern
+        if (cellX+patternmMatch.shape[0] < self.maskedMap.shape[0] and cellY+patternmMatch.shape[1] < self.maskedMap.shape[1])\
+        and value == patternmMatch[0][0]:
+
+            for coordXp in range(patternmMatch.shape[0]):
+                for coordYp in range(patternmMatch.shape[1]):
+                    # if any of it does not match, return False
+                    if patternmMatch[coordXp][coordYp] != self.maskedMap[cellX+coordXp][cellY+coordYp]: 
+                        return False
+            return True
+        else:
+            return False
+    """
