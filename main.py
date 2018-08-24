@@ -1,6 +1,6 @@
 
 from Optimizer.Building import BaseBuilding, BuildingList
-from Optimizer.SearchTree import NodeId, Node, NodeList, SearchTree
+from Optimizer.SearchTree import NodeId, Node, NodeList, SearchTree, memory_usage_resource
 from Optimizer.Map import BaseMap
 from Optimizer.Map import MapGeometry
 
@@ -13,19 +13,6 @@ import matplotlib.animation as animation
 
 import timeit
 from datetime import datetime, timedelta
-
-# Garbage collector to releas unreferenced memory
-import gc
-
-def memory_usage_resource():
-    import sys
-    import resource
-    rusage_denom = 1024.
-    if sys.platform == 'darwin':
-        # ... it seems that in OSX the output is different units ...
-        rusage_denom = rusage_denom * rusage_denom
-    mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / rusage_denom
-    return mem
 
 
 buildingList = BuildingList(buildingList = [
@@ -67,13 +54,9 @@ start = timeit.default_timer()
 #for index in range(5000):
 #    searchTree.expandLowerWeightNode()
 
-num_iterations = 500
-for index in range(num_iterations):
-    start1 = timeit.default_timer()
-    searchTree.expandAllNodesWithLowerWeight()
-    stop1 = timeit.default_timer()
-    print("\nIteration " + str(index) + " took " + str(stop1 - start1) + " nodeList contains up to " + str(len(searchTree.nodeList)) + " nodes (of "+str(searchTree.totalNodesNum)+" generated). Memory usage is : " + str(memory_usage_resource()) + " MB")
-    gc.collect()
+num_iterations = 20
+searchTree.searchTreeFor(num_iterations)
+
 
 stop = timeit.default_timer()
 

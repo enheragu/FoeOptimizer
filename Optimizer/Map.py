@@ -3,6 +3,8 @@ import numpy as np
 from shapely import geometry
 import concurrent.futures
 
+import time 
+
 class MapGeometry:
 
     def __init__(self, borderCoordinates):
@@ -39,10 +41,12 @@ class BaseMap:
     # @return                        True if it can be placed, false otherwise
     def placeBuildingInCorner(self, buildingType, position, place = True):
 
+        #debug print ("Matrix size is: (" + str(self.matrixMap.shape[0]) + "," + str(self.matrixMap.shape[0])+")")
         # Check that the space for this building is empty in the map
         for x in range(position[0], buildingType.size[0]+position[0]):
             for y in range(position[1], buildingType.size[1]+position[1]):
-                if x > self.matrixMap.shape[0] or y > self.matrixMap.shape[1] or x < 0 or y < 0:
+
+                if x >= self.matrixMap.shape[0] or y >= self.matrixMap.shape[1] or x < 0 or y < 0:
                     return False
 
                 if self.matrixMap[x][y] != 0:
@@ -62,29 +66,36 @@ class BaseMap:
     # @param buildingType            Buildin to place
     # @param position                Coordinates of the upper left corner
     # @return                        List of cells
-    def getNeighbourCellsTo(self, buildingType, position):
+    def getNeighbourCellsToBuilding(self, buildingType, position):
+        return self.getNeighbourCellsToArea(buildingType.size, position)
+
+    ## Gets all valid neighbour cells of a given building (identifier size and position) inside
+    #  the map
+    # @param size                    Area to search
+    # @param position                Coordinates of the upper left corner
+    # @return   
+    def getNeighbourCellsToArea(self, size, position):
         neighbourCells = []
         # Gets neighbours of the building (it thery are inside the matrix and empty)
-        if position[0] >= 0:
-            for cellY in range(position[1], position[1] + buildingType.size[1]):
+        if position[0] >= 1: # Compared against 1, if position[0] is 0 theres no neighbours at its left (end of matrix)
+            for cellY in range(position[1], position[1] + size[1]):
                 neighbourCells.append([position[0]-1,cellY])
 
-        if position[1] >= 0:
-            for cellX in range(position[0], position[0] + buildingType.size[0]):
+        if position[1] >= 1: # Compared against 1, if position[1] is 0 theres no neighbours over it (end of matrix)
+            for cellX in range(position[0], position[0] + size[0]):
                 neighbourCells.append([cellX,position[1]-1])
 
-        endPosition = [position[0] + buildingType.size[0], position[1] + buildingType.size[1]]
+        endPosition = [position[0] + size[0], position[1] + size[1]]
         #debug print("End position is: "+str(endPosition))
-        if endPosition[0] < self.matrixMap.shape[0]:
-            for cellY in range(endPosition[1] - buildingType.size[1], endPosition[1]):
+        if endPosition[0] < self.matrixMap.shape[0] -1: # Compared against size - 1, if position[0] is matrixSize theres no neighbours at its right (end of matrix)
+            for cellY in range(endPosition[1] - size[1], endPosition[1]):
                 neighbourCells.append([endPosition[0],cellY])
 
-        if endPosition[1] < self.matrixMap.shape[1]:
-            for cellX in range(endPosition[0] - buildingType.size[0], endPosition[0]):
+        if endPosition[1] < self.matrixMap.shape[1] -1: # Compared against size - 1, if position[1] is matrixSize theres no neighbours under it (end of matrix)
+            for cellX in range(endPosition[0] - size[0], endPosition[0]):
                 neighbourCells.append([cellX,endPosition[1]])
 
         return neighbourCells
-
 
     ## Gets all valid neighbour cells of a given building (identifier size and position) that are 
     #  empty
@@ -93,7 +104,7 @@ class BaseMap:
     # @return                        List of cells
     def getValidNeighbourCellsTo(self, buildingType, position):
         validCells = []
-        neighbourCells = self.getNeighbourCellsTo(buildingType, position)
+        neighbourCells = self.getNeighbourCellsToBuilding(buildingType, position)
         # Gets neighbours of the building (it thery are inside the matrix and empty)
 
         for cell in neighbourCells:
@@ -116,7 +127,7 @@ class BaseMap:
     # @param buildingType2           Building to search next to first building
     # @return                        True if the building is found next to the buinding1, false otherwise
     def isBuildingNextTo(self, buildingType1, position, buildingType2):
-        neighbourCells = self.getNeighbourCellsTo(buildingType1, position)
+        neighbourCells = self.getNeighbourCellsToBuilding(buildingType1, position)
 
         for cell in neighbourCells:
             if self.matrixMap[cell[0]][cell[1]] == buildingType2.mapIdentifier:
@@ -137,7 +148,7 @@ class BaseMap:
 
                     from Optimizer.Building import BaseBuilding
                     # Uses SimpleRoad type is its 1 cell sized, gets neighbours of cell
-                    neighbourCellsToCell = self.getNeighbourCellsTo(BaseBuilding(name = "SimpleRoad", size = [1,1], number = 0, nearBuildingList = ["SimpleRoad", "DoubleRoad", "Townhall"]), cell)
+                    neighbourCellsToCell = self.getNeighbourCellsToBuilding(BaseBuilding(name = "SimpleRoad", size = [1,1], number = 0, nearBuildingList = ["SimpleRoad", "DoubleRoad", "Townhall"]), cell)
                     # Intersection between both lists
                     commonCellList = [element for element in neighbourCells if element in neighbourCellsToCell]
                     #commonCellList = (set(neighbourCells).intersection(neighbourCellsToCell))
@@ -151,6 +162,23 @@ class BaseMap:
 
         return False
 
+    ## Checks in map if an area in a corner position is next to an id set
+    # @param size                    Size of the area
+    # @param position                Coordinates of the upper left corner
+    # @param buildingType2           ID to search
+    # @param matrix                  Give matrix if search should be performed in a given matrix and not the map one
+    # @return                        True if the building is found next to the buinding1, false otherwise
+    def isAreaNextToID(self, size, position, id, matrix = None):
+        neighbourCells = self.getNeighbourCellsToArea(size, position)
+
+        for cell in neighbourCells:
+            if matrix is None:
+                if self.matrixMap[cell[0]][cell[1]] == id:
+                    return True
+            else:
+                if matrix[cell[0]][cell[1]] == id:
+                    return True
+        return False
 
     ## Computes all corner positions valids for a building to be over a given cell
     # @param buildingType1           Buildin to check
@@ -173,14 +201,19 @@ class BaseMap:
         return len(np.nonzero(self.matrixMap == buildingId)[0])  # Tonwhall is 1, SimpleRoad is 2, DoubleRoad is 3
 
 
-    """ TOO TIME CONSUMING FOR NOW
+
+
+    # TOO TIME CONSUMING FOR NOW
     def findUnbiltHolesRounded(self):
         # Returns matrix with all 0 as TRUE and the rest as FALSE
 
         maskedMap = self.matrixMap > 0
         self.maskedMap = maskedMap != 0
         np.set_printoptions(threshold=np.inf)
+
+
         #debug print(maskedMap)
+        #debug time.sleep(10)
 
         # Searchs for whole patterns like (true when it is 0):
         #
@@ -189,61 +222,46 @@ class BaseMap:
         #  FALSE FALSE FALSE          FALSE FALSE FALSE FALSE         FALSE TRUE  FALSE
         #                                                             FALSE FALSE FALSE
 
-        self.holePatterns = []
-        self.holePatterns.append(np.array([[0, 0, 0], [0, 1, 0], [0, 0, 0]]))
-        self.holePatterns.append(np.array([[0, 0, 0, 0], [0, 1, 1, 0], [0, 0, 0, 0]]))
-        self.holePatterns.append(np.array([[0, 0, 0], [0, 1, 0], [0, 1, 0], [0, 0, 0]]))
+        #holePatterns = []
+        #holePatterns.append(np.array([[False, False, False], [False, True, False], [False, False, False]]))
+        #holePatterns.append(np.array([[False, False, False, False], [False, True, True, False], [False, False, False, False]]))
+        #holePatterns.append(np.array([[False, False, False], [False, True, False], [False, True, False], [False, False, False]]))
+
+
+        if np.count_nonzero(maskedMap == True) > np.count_nonzero(maskedMap == False):
+            cellList = np.argwhere(maskedMap == False)
+        else:
+            cellList = np.argwhere(maskedMap == True)
 
         countHoles = 0
+        
+        # Non threaded is faster
+        for cell in cellList:
+            countHoles += self.checkCellListForPattern(cell)
 
-        # # THREADED VERSION
         #with concurrent.futures.ThreadPoolExecutor() as executor:
         #    # Analyces cell row with PoolExecutor
-        #    for result in executor.map(self.patternStartsHere, np.ndenumerate(self.maskedMap)):
-        #        if result: 
-        #            countHoles += 1
-        ##
+        #    for result in executor.map(self.checkCellListForPattern, cellList):
+        #        countHoles += result
 
-        # Non threaded version
-        for cellAndValue in np.ndenumerate(self.maskedMap):
-            if self.patternStartsHere(cellAndValue): 
-                countHoles += 1
 
-        # Avoid keep extra memory
         del self.maskedMap
-        del self.holePatterns
-
-        #print ("Found " + str(countHoles) + " holes")
+        #debug print ("Found " + str(countHoles) + " holes")
         return countHoles
 
+    def checkCellListForPattern(self, cell):
 
-    # Checks if a given pattern starts in a cell of a matrix
-    def patternStartsHere(self, cellAndValue):
+        # Uses the area of the pattern to look at neighbours of it at a given coordinate
+        holePatternsAreas = []
+        holePatternsAreas.append([1,1])
+        holePatternsAreas.append([2,1])
+        holePatternsAreas.append([1,2])
 
-        # Cell and value is a tuple like: ((1,2), True)
-        cellX = cellAndValue[0][0]
-        cellY = cellAndValue[0][1]
-        value = cellAndValue[1]
+        countedHoles = 0
+        for pattern in holePatternsAreas:
+            #debug print("search in cell " + str(cell))
+            if not self.isAreaNextToID(cell, pattern, True, self.maskedMap): # Cheks -1 to go up left and look for the whole pattern
+                countedHoles += 1
 
-        #debug print("cellX: " + str(cellX) + ", cellY: " + str(cellY) + ", value: " + str(value) )
+        return countedHoles
 
-        for patternmMatch in self.holePatterns:
-            # No more than one pattern can match at the same time
-            if self.checkPattern(cellX, cellY, value, patternmMatch):
-                return True
-
-
-    def checkPattern(self, cellX, cellY, value, patternmMatch):        
-        # Check if pattern can fit in the rest of the matrix, and if the value match the first value of the pattern
-        if (cellX+patternmMatch.shape[0] < self.maskedMap.shape[0] and cellY+patternmMatch.shape[1] < self.maskedMap.shape[1])\
-        and value == patternmMatch[0][0]:
-
-            for coordXp in range(patternmMatch.shape[0]):
-                for coordYp in range(patternmMatch.shape[1]):
-                    # if any of it does not match, return False
-                    if patternmMatch[coordXp][coordYp] != self.maskedMap[cellX+coordXp][cellY+coordYp]: 
-                        return False
-            return True
-        else:
-            return False
-    """

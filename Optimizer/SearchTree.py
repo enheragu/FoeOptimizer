@@ -48,7 +48,20 @@ class Node:
         if not regressedMatrixMap.placeBuildingInCorner(self.buildingType, self.buildingPosition):
             raise Exception("Cannot place building in position "+str(self.buildingPosition)+" of map matrix")
 
+        self.nodeWeight = self.computeWeight(regressedMatrixMap)
+        self.adjustWeightWithMapHoles(regressedMatrixMap)
 
+        ## TOO TIME CONSUMING OPERATION BELOW ##
+        # Penalize empty holes between buildings
+        # self.nodeWeight += regressedMatrixMap.findUnbiltHolesRounded() * 30
+        ##                                    ##
+
+        self.childNodes = NodeList()
+
+        #debug print("Create "+str(self))
+
+
+    def computeWeight(self, regressedMatrixMap):
         # NodeWeight is builtBuildingArea / builtRoadArea | ONCE THE MAP IT'S BEEN UPDATED
         builtArea, numberBuiltBuildings = self.buildingList.getBuiltArea(regressedMatrixMap)
         roadBuiltArea = self.buildingList.getRoadArea(regressedMatrixMap)
@@ -60,22 +73,26 @@ class Node:
 
         if builtArea == 0 or numberBuiltBuildings == 0:
             # Penalize "only" roads city
-            self.nodeWeight = roadBuiltArea * 40
+            nodeWeight = roadBuiltArea * 40
         else:
-            self.nodeWeight = (roadBuiltArea * 100 / builtArea)
-            self.nodeWeight += (numberBuildings / numberBuiltBuildings)
-            self.nodeWeight += (wholeArea / builtArea)
+            nodeWeight = (roadBuiltArea * 100 / builtArea)
+            nodeWeight += (numberBuildings / numberBuiltBuildings)
+            nodeWeight += (wholeArea / builtArea)
 
-        self.nodeWeight = int(round(self.nodeWeight))
+        return int(round(nodeWeight))
 
-        ## TOO TIME CONSUMING OPERATION BELOW ##
-        # Penalize empty holes between buildings
-        # self.nodeWeight += regressedMatrixMap.findUnbiltHolesRounded() * 30
-        ##                                    ##
 
-        self.childNodes = NodeList()
+    # This operation is made appart as it is very time consuming, it will be decided wheter use it from time to time or not
+    # Search for map holes and penalize the weight with it
+    def adjustWeightWithMapHoles(self, regressedMatrixMap):
 
-        #debug print("Create "+str(self))
+        regressedMatrixMap = self.getRegressedMatrix()
+        self.nodeWeight = self.computeWeight(regressedMatrixMap)
+        #debug start1 = timeit.default_timer()
+        self.nodeWeight += regressedMatrixMap.findUnbiltHolesRounded() * 200
+        #debug stop1 = timeit.default_timer()
+        #debug print("Time spent finding holes is: ", stop1 -start1)
+
 
     def computeByBuilding(self, buildingName):
 
@@ -228,6 +245,7 @@ class SearchTree:
     def __init__(self, initialNode):
         self.nodeList = NodeList(initialNode)
         self.expandedNodeList = NodeList()
+        self.repeatedNodeList = NodeList()
         self.totalNodesNum = 0
 
     def getChildNodesOf(self, nodeList):
@@ -287,3 +305,57 @@ class SearchTree:
 
     def getLastExpandedNode(self):
         return self.nodeList[-1]
+
+
+    def pruneNodeList(self, nodeList):
+        for node in nodeList:
+            node.adjustWeightWithMapHoles(node.getRegressedMatrix())
+
+
+        for index1, node in enumerate(nodeList):
+            node1RegressedMatrix = node.getRegressedMatrix()
+            for idenx2, node2 in enumerate(nodeList):
+                if node.nodeWeight == node2.nodeWeight:
+                    print ("Two nodes with the same weight found with index: "+str(index1)+" and "+str(index2))
+                    if index1 != index2:
+                        if node1RegressedMatrix == node2.getRegressedMatrix(): ## Avoid deleting due to comparing the same node with itself
+                            print("Repeated matrix found")
+
+
+    def pruneTree(self):
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Analyces cell row with PoolExecutor
+
+            # With ProcessPool (can get very slow ¿?)
+            CHUNKSIZE = 100
+            executor.map(self.pruneNodeList, (self.nodeList[i:i+CHUNKSIZE] for i in (range(0, len(self.nodeList) , CHUNKSIZE))))
+
+
+    def searchTreeFor(self, numiterations):
+
+        # Garbage collector to releas unreferenced memory
+        import gc
+        import sys
+
+        for index in range(numiterations):
+            start1 = timeit.default_timer()
+            self.expandAllNodesWithLowerWeight()
+            stop1 = timeit.default_timer()
+            print("\nIteration " + str(index) + " took " + str(stop1 - start1) + " nodeList contains up to " + str(len(self.nodeList)) + " nodes (of "+str(self.totalNodesNum)+" generated). Memory usage is : " + str(memory_usage_resource()) + " MB")
+            gc.collect()
+
+            """start1 = timeit.default_timer()
+            self.pruneTree()
+            stop1 = timeit.default_timer()
+            print("\nPrune tree " + str(index) + " took " + str(stop1 - start1) + " nodeList contains now to " + str(len(self.nodeList)) + " nodes (of "+str(self.totalNodesNum)+" generated).")
+            gc.collect()"""
+
+def memory_usage_resource():
+    import sys
+    import resource
+    rusage_denom = 1024.
+    if sys.platform == 'darwin':
+        # ... it seems that in OSX the output is different units ...
+        rusage_denom = rusage_denom * rusage_denom
+    mem = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / rusage_denom
+    return mem
