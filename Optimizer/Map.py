@@ -207,13 +207,15 @@ class BaseMap:
     def findUnbiltHolesRounded(self):
         # Returns matrix with all 0 as TRUE and the rest as FALSE
 
-        maskedMap = self.matrixMap > 0
-        self.maskedMap = maskedMap != 0
+        #maskedMap = self.matrixMap > 0
+        #self.maskedMap = maskedMap != 0 
+        self.maskedMap = self.matrixMap == 0 
         np.set_printoptions(threshold=np.inf)
 
 
-        #debug print(maskedMap)
+        #debug print(self.maskedMap)
         #debug time.sleep(10)
+
 
         # Searchs for whole patterns like (true when it is 0):
         #
@@ -226,12 +228,8 @@ class BaseMap:
         #holePatterns.append(np.array([[False, False, False], [False, True, False], [False, False, False]]))
         #holePatterns.append(np.array([[False, False, False, False], [False, True, True, False], [False, False, False, False]]))
         #holePatterns.append(np.array([[False, False, False], [False, True, False], [False, True, False], [False, False, False]]))
-
-
-        if np.count_nonzero(maskedMap == True) > np.count_nonzero(maskedMap == False):
-            cellList = np.argwhere(maskedMap == False)
-        else:
-            cellList = np.argwhere(maskedMap == True)
+        
+        cellList = np.argwhere(self.maskedMap == True)
 
         countHoles = 0
         

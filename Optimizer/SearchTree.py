@@ -48,7 +48,7 @@ class Node:
         if not regressedMatrixMap.placeBuildingInCorner(self.buildingType, self.buildingPosition):
             raise Exception("Cannot place building in position "+str(self.buildingPosition)+" of map matrix")
 
-        self.nodeWeight = self.computeWeight(regressedMatrixMap)
+        self.nodeWeight = 0 # adjustWeightWithMapHoles already calls computeWeight to update self.nodeWeight self.computeWeight(regressedMatrixMap)
         self.adjustWeightWithMapHoles(regressedMatrixMap)
 
         ## TOO TIME CONSUMING OPERATION BELOW ##
@@ -89,11 +89,12 @@ class Node:
         regressedMatrixMap = self.getRegressedMatrix()
         self.nodeWeight = self.computeWeight(regressedMatrixMap)
         #debug start1 = timeit.default_timer()
-        self.nodeWeight += regressedMatrixMap.findUnbiltHolesRounded() * 200
+        self.nodeWeight += regressedMatrixMap.findUnbiltHolesRounded() * 300
         #debug stop1 = timeit.default_timer()
         #debug print("Time spent finding holes is: ", stop1 -start1)
 
 
+    # Compute all child options for a given building
     def computeByBuilding(self, buildingName):
 
         regressedMatrixMap = self.regressedMatrixMap
@@ -134,6 +135,8 @@ class Node:
 
         return childNodes
 
+    # Computes Child Nodes based on valid neighbour cells and building type that can or should go along with 
+    # this nodes building
     def computeChildNodes(self):
 
         start = timeit.default_timer()
@@ -150,7 +153,7 @@ class Node:
             for childNodes in executor.map(self.computeByBuilding, possibleBuildingsToPlace):
                 generateNodes += childNodes
 
-        # Avoid creation of repeated nodes
+        # Avoid creation of repeated child nodes
         for generateNode in generateNodes:
             if not self.childNodes.contains(generateNode[0], generateNode[1]):
                 self.childNodes.append(Node(self.buildingList, generateNode[0], generateNode[1], self))
@@ -162,14 +165,15 @@ class Node:
         return self.childNodes
 
 
+    # Goes up the search tree to parent nodes reasembling the matrix map with all buildings that each node locate
     def regressMatrixMapFromAncestryNodes(self, emptyMatrix):
-
         nextNode = self.parentNode
 
         while nextNode != None:
             emptyMatrix.placeBuildingInCorner(nextNode.buildingType, nextNode.buildingPosition)
             nextNode = nextNode.parentNode 
 
+    # Returns this node's map, with it ancestors buildings and it own located
     def getRegressedMatrix(self):
 
         regressedMatrixMap = cp.deepcopy(self.emptyMatrixMap)
@@ -179,6 +183,17 @@ class Node:
         regressedMatrixMap.placeBuildingInCorner(self.buildingType, self.buildingPosition)
 
         return regressedMatrixMap
+
+    # Goes up the search tree to see how mane levels where expanded to reach this node
+    def getSearchLevel(self):
+        level = 0
+        nextNode = self
+
+        while nextNode != None:
+            level += 1
+            nextNode = nextNode.parentNode 
+
+        return level
 
     ## Check if this is the searched building based on name or mapIdentifier
     # @param tag                    Name or mapIdentifier of the building
@@ -308,9 +323,6 @@ class SearchTree:
 
 
     def pruneNodeList(self, nodeList):
-        for node in nodeList:
-            node.adjustWeightWithMapHoles(node.getRegressedMatrix())
-
 
         for index1, node in enumerate(nodeList):
             node1RegressedMatrix = node.getRegressedMatrix()
@@ -344,11 +356,11 @@ class SearchTree:
             print("\nIteration " + str(index) + " took " + str(stop1 - start1) + " nodeList contains up to " + str(len(self.nodeList)) + " nodes (of "+str(self.totalNodesNum)+" generated). Memory usage is : " + str(memory_usage_resource()) + " MB")
             gc.collect()
 
-            """start1 = timeit.default_timer()
+            start1 = timeit.default_timer()
             self.pruneTree()
             stop1 = timeit.default_timer()
             print("\nPrune tree " + str(index) + " took " + str(stop1 - start1) + " nodeList contains now to " + str(len(self.nodeList)) + " nodes (of "+str(self.totalNodesNum)+" generated).")
-            gc.collect()"""
+            gc.collect()
 
 def memory_usage_resource():
     import sys
